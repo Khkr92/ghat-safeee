@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GHAT-SAFE Software</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800;900&family=Overpass+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: roadside-signage console — a live bend map up top, driver phone + controls beside it, tabs for dashboard and design notes */
+:root{
+  --bg:#E9ECEB; --panel:#F8F9F8; --ink:#16191C; --muted:#5A6268; --line:#C9CFCD;
+  --asphalt:#4A5056; --terrain:#C9D3C2; --hill:#9EAE92; --hill-line:#82937A;
+  --amber:#E8A200; --amber-ink:#1A1400; --red:#C8233A; --green:#1E8A4C; --blue:#2D6CB5;
+  --lane-mark:#F4F4F0;
+  --display:"Overpass","Arial Narrow",Arial,sans-serif;
+  --body:"Overpass",system-ui,-apple-system,Segoe UI,sans-serif;
+  --mono:"Overpass Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121518; --panel:#1B1F23; --ink:#E7EAE8; --muted:#97A0A6; --line:#2E353B;
+  --asphalt:#3A4046; --terrain:#26302A; --hill:#34442F; --hill-line:#46593F;
+  --amber:#F2B01E; --amber-ink:#1A1400; --red:#E5485D; --green:#35B36A; --blue:#5B9BE6; --lane-mark:#D9DCD6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121518; --panel:#1B1F23; --ink:#E7EAE8; --muted:#97A0A6; --line:#2E353B;
+  --asphalt:#3A4046; --terrain:#26302A; --hill:#34442F; --hill-line:#46593F;
+  --amber:#F2B01E; --amber-ink:#1A1400; --red:#E5485D; --green:#35B36A; --blue:#5B9BE6; --lane-mark:#D9DCD6; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px;margin-bottom:14px}
+.brand{display:flex;align-items:center;gap:12px}
+.diamond{width:44px;height:44px;background:var(--amber);transform:rotate(45deg);border-radius:5px;display:grid;place-items:center;flex:none;border:3px solid var(--ink)}
+.diamond span{transform:rotate(-45deg);font:900 20px var(--display);color:var(--amber-ink)}
+h1{font:900 clamp(24px,4vw,34px)/1 var(--display);margin:0;letter-spacing:.01em}
+.sub{color:var(--muted);margin:4px 0 0;font-size:14px}
+nav{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px}
+nav a{padding:7px 14px;border-radius:7px;color:var(--muted);text-decoration:none;font-weight:600;font-size:14px}
+nav a[aria-current="page"]{background:var(--ink);color:var(--bg)}
+nav a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.view{display:none}.view.on{display:block}
+.vms-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.vms{background:#0E0F10;border-radius:8px;padding:10px 14px;border:3px solid #2A2D30;min-width:0}
+.vms small{display:block;font:600 11px var(--mono);color:#8C949A;letter-spacing:.08em;text-transform:uppercase}
+.vms b{display:block;font:800 clamp(14px,2.2vw,20px)/1.2 var(--mono);letter-spacing:.04em;margin-top:2px}
+.vms.clear b{color:#3DDC84}.vms.oncoming b{color:#FFC21A}.vms.risk b{color:#FF4A5E;animation:blink 0.8s steps(2) infinite}
+@keyframes blink{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.vms.risk b{animation:none}}
+.mapbox{background:var(--terrain);border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;cursor:crosshair}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin:8px 2px 0}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px}
+.grid2{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;margin-top:16px}
+@media (max-width:820px){.grid2{grid-template-columns:1fr}.vms-row{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.panel h2{font:800 13px var(--display);text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 12px}
+/* phone */
+.phone{width:100%;max-width:280px;margin:0 auto;background:#0B0C0D;border-radius:30px;padding:12px;border:2px solid #33373B}
+.screen{background:#16191C;border-radius:20px;min-height:430px;color:#E9ECEB;padding:14px;display:flex;flex-direction:column;gap:10px}
+.sc-top{display:flex;justify-content:space-between;font:600 11px var(--mono);color:#8C949A}
+.sc-bend{font:800 13px var(--display);letter-spacing:.04em}
+.alert{border-radius:12px;padding:12px;text-align:center;font:900 18px/1.15 var(--display);letter-spacing:.02em}
+.alert small{display:block;font:600 12px/1.3 var(--body);letter-spacing:0;margin-top:6px;opacity:.9}
+.a-clear{background:#14532D;color:#C9F7D9}.a-oncoming{background:#E8A200;color:#1A1400}.a-risk{background:#C8233A;color:#fff}
+.a-over{background:#7A1020;color:#fff}.a-idle{background:#2A2E33;color:#B5BCC1}.a-noapp{background:#2A2E33;color:#B5BCC1}
+.speedo{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.spd{font:900 54px/1 var(--display);font-variant-numeric:tabular-nums}
+.spd small{font:600 13px var(--mono);color:#8C949A;margin-left:4px}
+.limit{width:64px;height:64px;border-radius:50%;background:#fff;border:7px solid #C8233A;color:#111;display:grid;place-items:center;font:900 24px var(--display)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font:400 12px var(--mono);color:#B5BCC1}
+.kv b{color:#E9ECEB;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.phone-note{font-size:12px;color:var(--muted);text-align:center;margin:10px 0 0}
+/* controls */
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+label.f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}
+label.f span.h{font-weight:400;color:var(--muted);font-size:12px}
+select,input[type=range]{width:100%}
+select{font:inherit;padding:7px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.toggle{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;cursor:pointer}
+.toggle input{width:18px;height:18px;accent-color:var(--ink)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button{font:600 13px var(--body);padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.calc{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.calc div{border-top:2px solid var(--ink);padding-top:6px}
+.calc small{display:block;font:600 11px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.calc b{font:800 22px var(--display);font-variant-numeric:tabular-nums}
+.calc em{font-style:normal;font-size:12px;color:var(--muted);display:block}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:16px}
+.stat{background:var(--bg);border-radius:8px;padding:10px 12px}
+.stat small{display:block;font-size:12px;color:var(--muted)}
+.stat b{font:800 26px var(--display);font-variant-numeric:tabular-nums}
+/* dashboard */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi small{color:var(--muted);font-size:12px;display:block}
+.kpi b{font:900 32px/1.1 var(--display);font-variant-numeric:tabular-nums}
+.bars{display:grid;gap:12px}
+.bar{display:grid;grid-template-columns:110px minmax(0,1fr) 70px;align-items:center;gap:10px;font-size:13px}
+.bar .track{height:22px;background:var(--bg);border-radius:4px;overflow:hidden}
+.bar .fill{height:100%;border-radius:4px;transition:width .4s}
+.bar b{font-variant-numeric:tabular-nums;text-align:right}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;text-align:right}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700}
+.p-red{background:var(--red);color:#fff}.p-amber{background:var(--amber);color:var(--amber-ink)}.p-green{background:var(--green);color:#fff}.p-grey{background:var(--line);color:var(--ink)}
+.dash-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:820px){.dash-grid{grid-template-columns:1fr}}
+.sample{font:600 11px var(--mono);color:var(--muted);margin-left:6px}
+.log{max-height:340px;overflow:auto}
+/* how */
+.prose{max-width:72ch}
+.prose h3{font:800 20px var(--display);margin:28px 0 8px;text-wrap:balance}
+.prose p,.prose li{color:var(--ink)}
+.prose code,pre{font-family:var(--mono);font-size:13px}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;overflow-x:auto;line-height:1.55}
+.arch{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.arch svg{min-width:640px;width:100%;height:auto;display:block}
+.cmp th:first-child,.cmp td:first-child{font-weight:600}
+.cmp td{white-space:normal;vertical-align:top}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+<header>
+  <div class="brand">
+    <div class="diamond" aria-hidden="true"><span>!</span></div>
+    <div>
+      <h1>GHAT-SAFE</h1>
+      <p class="sub">Software-only blind-curve warning for ghat roads · phone GPS + existing CCTV + cloud logic</p>
+    </div>
+  </div>
+  <nav aria-label="Sections">
+    <a href="#sim" data-tab="sim">Simulator</a>
+    <a href="#dash" data-tab="dash">Authority dashboard</a>
+    <a href="#how" data-tab="how">How it works</a>
+  </nav>
+</header>
+
+<!-- ============ SIMULATOR ============ -->
+<section class="view" id="v-sim">
+  <div class="vms-row">
+    <div class="vms" id="vmsA"><small>Virtual sign · drivers at Approach A</small><b>CLEAR — DRIVE CAREFULLY</b></div>
+    <div class="vms" id="vmsB"><small>Virtual sign · drivers at Approach B</small><b>CLEAR — DRIVE CAREFULLY</b></div>
+  </div>
+  <div class="mapbox"><canvas id="cv" aria-label="Live map of a hairpin bend with vehicles and warning zones"></canvas></div>
+  <div class="legend">
+    <span><i style="background:var(--blue)"></i>Vehicle A → B</span>
+    <span><i style="background:#8A5CC2"></i>Vehicle B → A</span>
+    <span><i style="background:transparent;border:2px solid var(--ink)"></i>White ring = GHAT-SAFE app active</span>
+    <span><i style="background:var(--amber);opacity:.6"></i>Geofenced warning zone</span>
+    <span><i style="background:var(--red);opacity:.45"></i>Blind conflict zone</span>
+    <span>Tap a vehicle to view its phone</span>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Driver app</h2>
+      <div class="phone"><div class="screen" id="screen">
+        <div class="sc-top"><span>GHAT-SAFE</span><span id="ph-gps">GPS ●</span></div>
+        <div class="sc-bend">HAIRPIN BEND 07 · SIM</div>
+        <div class="alert a-idle" id="ph-alert">WAITING<small>Select a vehicle on the map</small></div>
+        <div class="speedo"><div class="spd" id="ph-spd">--<small>km/h</small></div><div class="limit" id="ph-lim">25</div></div>
+        <div class="kv">
+          <span>Vehicle</span><b id="ph-veh">—</b>
+          <span>Distance to bend</span><b id="ph-dist">—</b>
+          <span>Oncoming detected</span><b id="ph-onc">—</b>
+          <span>Last GPS fix</span><b id="ph-fix">—</b>
+        </div>
+        <div class="kv" style="margin-top:auto"><span>Voice</span><b id="ph-voice" style="text-align:right;white-space:normal;font-weight:400">—</b></div>
+      </div></div>
+      <p class="phone-note"><button id="snd">Turn on alert sound</button></p>
+    </div>
+
+    <div class="panel">
+      <h2>Bend setup & system</h2>
+      <div class="controls">
+        <label class="f">Weather
+          <select id="weather"><option value="clear">Clear day</option><option value="rain">Rain / wet surface</option><option value="fog">Fog / night</option></select>
+          <span class="h">Changes advisory speed, friction and sight distance</span>
+        </label>
+        <label class="f">Traffic volume
+          <select id="rate"><option value="0.6">Light</option><option value="1" selected>Moderate</option><option value="1.7">Heavy (festival / weekend)</option></select>
+        </label>
+        <label class="f">App adoption: <span id="adoptVal">60%</span>
+          <input type="range" id="adopt" min="0" max="100" step="5" value="60">
+          <span class="h">Share of drivers running the GHAT-SAFE app</span>
+        </label>
+        <label class="f">Simulation speed
+          <select id="simspd"><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option></select>
+        </label>
+      </div>
+      <div class="btns">
+        <label class="toggle"><input type="checkbox" id="sys" checked> GHAT-SAFE system on</label>
+        <label class="toggle"><input type="checkbox" id="cctv" checked> Use existing CCTV (AI detection)</label>
+      </div>
+      <div class="btns">
+        <button class="primary" id="pause">Pause</button>
+        <button id="reset">Reset statistics</button>
+      </div>
+
+      <div class="calc">
+        <div><small>Advisory speed</small><b id="c-adv">25 km/h</b><em>shown in app</em></div>
+        <div><small>SSD at 40 km/h</small><b id="c-ssd">—</b><em>v·t + v²/2gf, t = 2.5 s</em></div>
+        <div><small>Geofence length</small><b id="c-zone">—</b><em>SSD + 2 s GPS/network lag</em></div>
+        <div><small>Visual sight in bend</small><b id="c-sight">—</b><em>blocked by hill face</em></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><small>Vehicles through bend</small><b id="s-pass">0</b></div>
+        <div class="stat"><small>Oncoming warnings sent</small><b id="s-warn">0</b></div>
+        <div class="stat"><small>Overspeed alerts</small><b id="s-over">0</b></div>
+        <div class="stat"><small>Near-misses in bend</small><b id="s-near">0</b></div>
+        <div class="stat"><small>Undetected vehicles</small><b id="s-undet">0</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DASHBOARD ============ -->
+<section class="view" id="v-dash">
+  <div class="kpis">
+    <div class="kpi"><small>Opposing passes in blind bend</small><b id="d-pairs">0</b></div>
+    <div class="kpi"><small>Near-miss rate, system ON</small><b id="d-on">—</b></div>
+    <div class="kpi"><small>Near-miss rate, system OFF</small><b id="d-off">—</b></div>
+    <div class="kpi"><small>Detection coverage</small><b id="d-cov">—</b></div>
+  </div>
+  <div class="dash-grid">
+    <div class="panel">
+      <h2>Before / after comparison (this session)</h2>
+      <div class="bars">
+        <div class="bar"><span>System OFF</span><div class="track"><div class="fill" id="b-off" style="width:0;background:var(--red)"></div></div><b id="bt-off">—</b></div>
+        <div class="bar"><span>System ON</span><div class="track"><div class="fill" id="b-on" style="width:0;background:var(--green)"></div></div><b id="bt-on">—</b></div>
+      </div>
+      <p class="sub" style="margin-top:12px">Near-miss = two opposing vehicles meet inside the blind bend with a closing speed above 40 km/h. Run the simulator with the system switched off for a few minutes to build a baseline, then switch it on.</p>
+    </div>
+    <div class="panel">
+      <h2>Bend network <span class="sample">EXAMPLE DATA</span></h2>
+      <div class="tbl"><table>
+        <thead><tr><th>Bend</th><th>Road</th><th class="num">Alerts / day</th><th class="num">Overspeed %</th><th>Risk</th></tr></thead>
+        <tbody id="net"></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:16px">
+    <h2>Live event log</h2>
+    <div class="tbl log"><table>
+      <thead><tr><th>Sim time</th><th>Event</th><th>Vehicle</th><th>Detail</th></tr></thead>
+      <tbody id="log"><tr><td colspan="4" style="color:var(--muted)">Events appear here as the simulator runs.</td></tr></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="view" id="v-how">
+  <div class="prose">
+    <h3>From hardware to software</h3>
+    <p>The hardware GHAT-SAFE used IR or radar sensors at each approach, a microcontroller, and LED boards. The software version keeps the same three steps (Detect, Warn, Guide) but replaces every physical part with something that already exists: drivers' smartphones, CCTV cameras already on the ghat road, and a cloud service.</p>
+  </div>
+  <div class="tbl" style="margin:12px 0 4px"><table class="cmp">
+    <thead><tr><th>Function</th><th>Hardware prototype</th><th>Software version</th></tr></thead>
+    <tbody>
+      <tr><td>Detect vehicle</td><td>IR break-beam / radar pair at Approach A and B</td><td>Phone GPS entering a geofenced approach zone; AI vehicle detection on existing CCTV feed</td></tr>
+      <tr><td>Logic unit</td><td>Arduino / ESP32 at the roadside</td><td>Cloud bend-state service (one record per bend, updated every second)</td></tr>
+      <tr><td>Warning</td><td>Amber LED board on opposite approach</td><td>Full-screen alert + voice in the driver app; optional push to navigation apps</td></tr>
+      <tr><td>Power</td><td>Solar panel + battery</td><td>None at site (phones and existing cameras)</td></tr>
+      <tr><td>Monitoring</td><td>Manual site visits</td><td>Authority dashboard with alerts, overspeed share and near-miss trends</td></tr>
+      <tr><td>Cost per bend</td><td>₹1,550–₹2,800 prototype, much more for field-grade</td><td>Near zero per bend; cost is app + server hosting</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="prose"><h3>System architecture</h3></div>
+  <div class="arch">
+    <svg viewBox="0 0 900 300" role="img" aria-label="Architecture: driver app and CCTV feed send positions to the cloud bend-state engine, which pushes warnings to apps and logs to the dashboard">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+      <g font-family="Overpass, sans-serif" font-size="14" fill="var(--ink)">
+        <rect x="20" y="30" width="200" height="90" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
+        <text x="120" y="62" text-anchor="middle" font-weight="800">Driver app (Android)</text>
+        <text x="120" y="84" text-anchor="middle" font-size="12" fill="var(--muted)">GPS 1 Hz · speed · heading</text>
+        <text x="120" y="102" text-anchor="middle" font-size="12" fill="var(--muted)">on-device geofences</text>
+        <rect x="20" y="170" width="200" height="90" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
+        <text x="120" y="202" text-anchor="middle" font-weight="800">Existing CCTV at bend</text>
+        <text x="120" y="224" text-anchor="middle" font-size="12" fill="var(--muted)">YOLO vehicle detection</text>
+        <text x="120" y="242" text-anchor="middle" font-size="12" fill="var(--muted)">direction by tracking</text>
+        <rect x="340" y="90" width="230" height="120" rx="10" fill="var(--panel)" stroke="var(--amber)" stroke-width="3"/>
+        <text x="455" y="124" text-anchor="middle" font-weight="900">Bend-state engine (cloud)</text>
+        <text x="455" y="148" text-anchor="middle" font-size="12" fill="var(--muted)">zone occupancy per bend</text>
+        <text x="455" y="166" text-anchor="middle" font-size="12" fill="var(--muted)">CLEAR / ONCOMING / HEAD-ON RISK</text>
+        <text x="455" y="184" text-anchor="middle" font-size="12" fill="var(--muted)">overspeed + event logging</text>
+        <rect x="680" y="30" width="200" height="90" rx="10" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
+        <text x="780" y="62" text-anchor="middle" font-weight="800">Warning to drivers</text>
+        <text x="780" y="84" text-anchor="middle" font-size="12" fill="var(--muted)">alert screen + voice</text>
+        <text x="780" y="102" text-anchor="middle" font-size="12" fill="var(--muted)">push in &lt; 1 s</text>
+        <rect x="680" y="170" width="200" height="90" rx="10" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
+        <text x="780" y="202" text-anchor="middle" font-weight="800">Authority dashboard</text>
+        <text x="780" y="224" text-anchor="middle" font-size="12" fill="var(--muted)">bend risk ranking</text>
+        <text x="780" y="242" text-anchor="middle" font-size="12" fill="var(--muted)">audit & enforcement data</text>
+        <path d="M220 75 L338 130" stroke="var(--muted)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+        <path d="M220 215 L338 175" stroke="var(--muted)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+        <path d="M570 130 L678 75" stroke="var(--muted)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+        <path d="M570 175 L678 215" stroke="var(--muted)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+        <text x="270" y="92" font-size="11" fill="var(--muted)">MQTT / HTTPS</text>
+        <text x="610" y="92" font-size="11" fill="var(--muted)">push</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="prose">
+    <h3>Core algorithm (runs every second for each bend)</h3>
+  </div>
+<pre>advisory   = ADVISORY[weather]                 // 25 / 20 / 20 km/h
+SSD(v)     = v·t + v² / (2·g·f)                 // t = 2.5 s, f by weather
+zoneLength = SSD(40 km/h) + v·2 s               // covers GPS + network delay
+
+occA = vehicles heading A→B inside [bendStart − zoneLength, bendEnd]
+occB = vehicles heading B→A inside [bendStart, bendEnd + zoneLength]
+
+for each driver d inside their approach zone:
+    oncoming = (d from A) ? occB : occA
+    if oncoming vehicle already inside bend → HEAD-ON RISK : "Hold left, slow to 15"
+    elif oncoming in its approach zone      → ONCOMING     : "Vehicle ahead, slow down"
+    else                  → CLEAR         : "Drive carefully, max {advisory}"
+    if d.speed > advisory + 5 → OVERSPEED : "Slow down, hairpin ahead"
+
+log every alert, overspeed and near-miss for the dashboard</pre>
+
+  <div class="prose">
+    <h3>Software stack for the real build</h3>
+    <ul>
+      <li><b>Driver app:</b> Flutter or native Android. Fused-location GPS at 1 Hz near bends, geofences stored on the phone so alerts still work in weak signal, text-to-speech in Telugu, Hindi and English.</li>
+      <li><b>Backend:</b> Node.js or Python (FastAPI) with Redis for live bend state and PostgreSQL + PostGIS for bend geometry and logs. MQTT or WebSocket for sub-second push.</li>
+      <li><b>CCTV module:</b> Python + OpenCV + a YOLO vehicle model on a small edge PC or the existing control-room server. Sends only counts and direction, never video.</li>
+      <li><b>Dashboard:</b> Web app (this page is a working prototype of it) with bend ranking, overspeed share, and exportable reports for road-safety audits.</li>
+    </ul>
+
+    <h3>Limits to state honestly</h3>
+    <ul>
+      <li>Drivers without the app are invisible unless a camera covers the bend. Use the adoption slider to see this effect; at low adoption the CCTV module matters most.</li>
+      <li>Phone GPS is accurate to about 3–10 m and weakens under cliffs. It cannot tell which lane a vehicle is in, so the system warns about presence, not lane violations.</li>
+      <li>Mobile coverage on ghat roads is patchy. On-device geofences and the CCTV path reduce, but do not remove, this risk.</li>
+      <li>The app must never replace signs, chevrons, mirrors or barriers. It adds a layer on top of the standard measures from a road-safety audit.</li>
+      <li>Screen alerts can distract. Voice-first alerts and a locked, simple screen while moving are design requirements.</li>
+    </ul>
+
+    <h3>Pilot plan</h3>
+    <ol>
+      <li>Map three to five crash-prone bends with the road authority and record their geometry.</li>
+      <li>Collect two weeks of baseline speed and conflict data from CCTV, system off.</li>
+      <li>Release the app to bus and goods-vehicle drivers first (high mileage on ghat roads, easy to reach through depots).</li>
+      <li>Run four weeks with the system on and compare near-miss rate and overspeed share.</li>
+    </ol>
+  </div>
+</section>
+</div>
+
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const cfg={R:22,Ls:120,w:1.75,weather:'clear',adoption:60,cctv:true,system:true,rate:1,simspd:2};
+const WX={clear:{adv:25,f:0.40,sight:30,name:'Clear'},rain:{adv:20,f:0.30,sight:25,name:'Rain'},fog:{adv:20,f:0.35,sight:14,name:'Fog'}};
+const TYPES=[{n:'Car',len:4.5,p:.55,v:[30,50]},{n:'Bike',len:2.1,p:.2,v:[30,50]},{n:'Bus',len:11,p:.12,v:[25,40]},{n:'Truck',len:9,p:.13,v:[20,35]}];
+const P=()=>Math.PI*cfg.R, L=()=>2*cfg.Ls+P();
+function ssd(kmh,f){const v=kmh/3.6;return v*2.5+v*v/(2*9.81*f);}
+function zoneLen(){return Math.ceil(ssd(40,WX[cfg.weather].f)+2*40/3.6);}
+function geo(s){const R=cfg.R,Ls=cfg.Ls,p=P();
+  if(s<Ls) return {x:s-Ls,y:R,tx:1,ty:0};
+  if(s<Ls+p){const a=(s-Ls)/R;return {x:R*Math.sin(a),y:R*Math.cos(a),tx:Math.cos(a),ty:-Math.sin(a)};}
+  return {x:-(s-Ls-p),y:-R,tx:-1,ty:0};}
+function place(s,lane){const g=geo(s);const nx=g.ty,ny=-g.tx;return {x:g.x+lane*cfg.w*nx,y:g.y+lane*cfg.w*ny,ang:Math.atan2(g.ty,g.tx)};}
+
+let veh=[],nextId=1,simT=0,paused=false,selId=null,soundOn=false,actx=null;
+let spawnT={A:2,B:4};
+let st,tally,pairsSeen,events;
+function resetStats(){st={pass:0,warn:0,over:0,near:0,undet:0};tally={on:{pairs:0,near:0,det:0,tot:0},off:{pairs:0,near:0,det:0,tot:0}};pairsSeen=new Set();events=[];renderLog();}
+resetStats();
+
+function pickType(){let r=Math.random(),c=0;for(const t of TYPES){c+=t.p;if(r<c)return t;}return TYPES[0];}
+function spawn(dir){
+  const s0=dir>0?0:L();
+  if(veh.some(v=>v.dir===dir&&Math.abs(v.s-s0)<25)) return false;
+  const t=pickType();const want=(t.v[0]+Math.random()*(t.v[1]-t.v[0]))/3.6;
+  const v={id:nextId++,dir,s:s0,v:want,want,bend:(24+Math.random()*16)/3.6,type:t.n,len:t.len,
+    app:Math.random()*100<cfg.adoption,rep:{s:s0,v:want,t:simT},state:'idle',prev:'idle',seenAt:null,counted:false,detEver:false,inBendLogged:false};
+  veh.push(v);
+  if(selId===null||!veh.some(x=>x.id===selId)){ if(v.app) selId=v.id; }
+  return true;
+}
+function log(type,v,detail){events.unshift({t:simT,type,id:v?('#'+v.id+' '+v.type):'—',detail});if(events.length>120)events.pop();renderLog();}
+function fmtT(t){const m=Math.floor(t/60),s=Math.floor(t%60);return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');}
+const PILL={'Near-miss':'p-red','Head-on risk':'p-red','Overspeed':'p-amber','Oncoming warning':'p-amber','Safe pass':'p-green','Undetected':'p-grey'};
+function renderLog(){const tb=$('#log');if(!tb)return;if(!events.length){tb.innerHTML='<tr><td colspan="4" style="color:var(--muted)">Events appear here as the simulator runs.</td></tr>';return;}
+  tb.innerHTML=events.slice(0,60).map(e=>`<tr><td style="font-family:var(--mono)">${fmtT(e.t)}</td><td><span class="pill ${PILL[e.type]||'p-grey'}">${e.type}</span></td><td>${e.id}</td><td>${e.detail}</td></tr>`).join('');}
+
+function inCam(s){return s>cfg.Ls-35&&s<cfg.Ls+P()+35;}
+function inZone(v,Z){const Ls=cfg.Ls,p=P();return v.dir>0? (v.s>=Ls-Z&&v.s<=Ls+p) : (v.s>=Ls&&v.s<=Ls+p+Z);}
+let signA='clear',signB='clear';
+
+function step(dt){
+  simT+=dt;
+  const wx=WX[cfg.weather],Z=zoneLen(),Ls=cfg.Ls,p=P(),Lt=L();
+  for(const side of ['A','B']){spawnT[side]-=dt;if(spawnT[side]<=0){spawn(side==='A'?1:-1);spawnT[side]=(5+Math.random()*9)/cfg.rate;}}
+  // sensing
+  for(const v of veh){
+    if(v.app&&simT-v.rep.t>=1){v.rep={s:v.s+(Math.random()*8-4),v:v.v+(Math.random()*0.8-0.4),t:simT};}
+    v.det=cfg.system&&(v.app||(cfg.cctv&&inCam(v.s)));
+    v.ks=v.app?v.rep.s:v.s;
+    if(v.det) v.detEver=true;
+  }
+  // server: zone occupancy
+  const occA=veh.filter(v=>v.dir>0&&v.det&&v.ks>=Ls-Z&&v.ks<=Ls+p);
+  const occB=veh.filter(v=>v.dir<0&&v.det&&v.ks>=Ls&&v.ks<=Ls+p+Z);
+  const inBend=x=>x.ks>=Ls&&x.ks<=Ls+p;
+  signA=!cfg.system?'off':occB.some(inBend)?'risk':occB.length?'oncoming':'clear';
+  signB=!cfg.system?'off':occA.some(inBend)?'risk':occA.length?'oncoming':'clear';
+  // per vehicle
+  for(const v of veh){
+    const zone=inZone(v,Z);
+    let state='idle';
+    if(cfg.system&&v.app&&zone){state=v.dir>0?signA:signB; if(v.v*3.6>wx.adv+5&&state!=='risk') state='over';}
+    v.prev=v.state;v.state=state;
+    if(state!==v.prev){
+      if(state==='oncoming'){st.warn++;log('Oncoming warning',v,`Slow to ${wx.adv} km/h · ${v.dir>0?'A':'B'} side`);beepIf(v,1);}
+      if(state==='risk'){st.warn++;log('Head-on risk',v,'Oncoming vehicle already in blind bend · hold left, 15 km/h');beepIf(v,2);}
+      if(state==='over'&&!v.overCounted){v.overCounted=true;st.over++;log('Overspeed',v,`${Math.round(v.v*3.6)} km/h in ${wx.adv} km/h zone`);beepIf(v,1);}
+    }
+    // target speed
+    let cap=v.want;
+    const nearBend=v.s>Ls-15&&v.s<Ls+p+15;
+    if(nearBend) cap=Math.min(cap,v.bend);
+    if(state==='clear'||state==='over') cap=Math.min(cap,wx.adv/3.6);
+    if(state==='oncoming') cap=Math.min(cap,Math.max(15,wx.adv-8)/3.6);
+    if(state==='risk') cap=Math.min(cap,15/3.6);
+    // visual sighting of opposing vehicle (blind bend limits it)
+    let hard=false;
+    for(const o of veh){ if(o.dir===v.dir) continue;
+      const gap=(o.s-v.s)*v.dir; if(gap<=0) continue;
+      const inArc=x=>x.s>Ls&&x.s<Ls+p;
+      const sameLeg=(v.s<Ls&&o.s<Ls)||(v.s>Ls+p&&o.s>Ls+p);
+      if(!sameLeg&&gap<wx.sight){ if(v.seenAt===null) v.seenAt=simT; if(simT-v.seenAt>1.0){cap=Math.min(cap,12/3.6);hard=true;} }
+    }
+    if(!veh.some(o=>o.dir!==v.dir&&(o.s-v.s)*v.dir>0&&(o.s-v.s)*v.dir<wx.sight)) v.seenAt=null;
+    // car following
+    let lead=null,lg=1e9;for(const o of veh){if(o.dir!==v.dir||o===v)continue;const g=(o.s-v.s)*v.dir;if(g>0&&g<lg){lg=g;lead=o;}}
+    if(lead){const need=6+v.v*1.6+lead.len; if(lg<need) cap=Math.min(cap,lead.v); if(lg<lead.len+3) cap=0;}
+    if(v.v>cap) v.v=Math.max(cap,v.v-(hard?5:2.8)*dt); else v.v=Math.min(cap,v.v+1.2*dt);
+    v.s+=v.dir*v.v*dt;
+  }
+  // near-miss detection
+  for(const a of veh){ if(a.dir<0) continue;
+    for(const b of veh){ if(b.dir>0) continue;
+      const k=a.id+'-'+b.id; if(pairsSeen.has(k)) continue;
+      const inb=x=>x.s>Ls-4&&x.s<Ls+p+4;
+      if(inb(a)&&inb(b)&&Math.abs(a.s-b.s)<6){
+        pairsSeen.add(k);const close=(a.v+b.v)*3.6;const T=tally[cfg.system?'on':'off'];T.pairs++;
+        if(close>40){st.near++;T.near++;log('Near-miss',a,`Met #${b.id} ${b.type} at ${Math.round(close)} km/h closing speed`);}
+        else log('Safe pass',a,`Met #${b.id} at ${Math.round(close)} km/h closing speed`);
+      }}}
+  // exits
+  veh=veh.filter(v=>{
+    if(!v.counted&&((v.dir>0&&v.s>Ls+p)||(v.dir<0&&v.s<Ls))){v.counted=true;st.pass++;const T=tally[cfg.system?'on':'off'];T.tot++;if(v.detEver)T.det++;
+      if(cfg.system&&!v.detEver){st.undet++;log('Undetected',v,'No app and outside camera view');}}
+    return v.s>-6&&v.s<Lt+6;});
+}
+
+function beepIf(v,n){ if(!soundOn||v.id!==selId||!actx) return;
+  for(let i=0;i<n;i++){const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=n>1?980:760;o.connect(g);g.connect(actx.destination);
+    const t=actx.currentTime+i*0.22;g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.25,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.18);o.start(t);o.stop(t+0.2);} }
+
+// ---------- drawing ----------
+const cv=$('#cv'),ctx=cv.getContext('2d');let k=1,xmin,ymin,dpr=1;
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function resize(){const R=cfg.R;xmin=-cfg.Ls-6;const xmax=R+16;ymin=-R-14;const ymax=R+14;
+  const w=cv.parentElement.clientWidth;if(!w)return;const h=Math.round(w*(ymax-ymin)/(xmax-xmin));const hh=Math.max(h,170);
+  dpr=window.devicePixelRatio||1;cv.width=w*dpr;cv.height=hh*dpr;cv.style.height=hh+'px';
+  k=Math.min(w/(xmax-xmin),hh/(ymax-ymin));
+  // centre vertically if min height kicked in
+  ymin=ymin-((hh/k)-(ymax-ymin))/2;}
+const X=x=>(x-xmin)*k, Y=y=>(y-ymin)*k;
+function pathAlong(s0,s1,lane){ctx.beginPath();const n=Math.max(4,Math.ceil((s1-s0)/2));for(let i=0;i<=n;i++){const q=place(s0+(s1-s0)*i/n,lane);i?ctx.lineTo(X(q.x),Y(q.y)):ctx.moveTo(X(q.x),Y(q.y));}}
+const VCOL={1:'',[-1]:'#8A5CC2'};
+function draw(){
+  const C={terr:css('--terrain'),hill:css('--hill'),hl:css('--hill-line'),asp:css('--asphalt'),amb:css('--amber'),red:css('--red'),blue:css('--blue'),lm:css('--lane-mark'),ink:css('--ink'),muted:css('--muted')};
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const W=cv.width/dpr,H=cv.height/dpr;
+  ctx.fillStyle=C.terr;ctx.fillRect(0,0,W,H);
+  const R=cfg.R,Ls=cfg.Ls,p=P(),Z=zoneLen(),wx=WX[cfg.weather];
+  // hill inside hairpin
+  for(let i=0;i<4;i++){const r=R-5-i*3.2;if(r<3)break;ctx.beginPath();ctx.moveTo(X(-Ls+18+i*10),Y(-r));ctx.lineTo(X(0),Y(-r));ctx.arc(X(0),Y(0),r*k,-Math.PI/2,Math.PI/2);ctx.lineTo(X(-Ls+18+i*10),Y(r));ctx.closePath();
+    ctx.fillStyle=i===0?C.hill:'transparent';ctx.fill();ctx.strokeStyle=C.hl;ctx.lineWidth=1;ctx.stroke();}
+  ctx.fillStyle=C.ink;ctx.globalAlpha=.55;ctx.font=`700 ${Math.max(10,k*3.2)}px Overpass, sans-serif`;ctx.textAlign='center';ctx.fillText('HILL FACE — BLOCKS VIEW',X(-Ls*0.42),Y(1.2));ctx.globalAlpha=1;
+  // road
+  pathAlong(0,L(),0);ctx.strokeStyle=C.asp;ctx.lineWidth=7.6*k;ctx.lineCap='butt';ctx.lineJoin='round';ctx.stroke();
+  // outer crash barrier around bend
+  ctx.beginPath();ctx.arc(X(0),Y(0),(R+4.6)*k,-Math.PI/2,Math.PI/2);ctx.strokeStyle=C.muted;ctx.lineWidth=2;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=C.muted;ctx.font=`600 ${Math.max(9,k*2.6)}px Overpass, sans-serif`;ctx.textAlign='left';ctx.fillText('VALLEY SIDE',X(R+6),Y(R+10));
+  // zones
+  ctx.globalAlpha=.45;ctx.lineWidth=3.3*k;
+  if(cfg.system){ctx.strokeStyle=C.amb;pathAlong(Ls-Z,Ls,1);ctx.stroke();pathAlong(Ls+p,Ls+p+Z,-1);ctx.stroke();}
+  ctx.strokeStyle=C.red;ctx.lineWidth=7.4*k;ctx.globalAlpha=.32;pathAlong(Ls,Ls+p,0);ctx.stroke();ctx.globalAlpha=1;
+  // centre line
+  pathAlong(0,L(),0);ctx.strokeStyle=C.lm;ctx.lineWidth=Math.max(1,k*0.3);ctx.setLineDash([k*3,k*3]);ctx.stroke();ctx.setLineDash([]);
+  // camera
+  if(cfg.cctv&&cfg.system){const cx=X(R+9),cy=Y(0);ctx.fillStyle=C.ink;ctx.globalAlpha=.12;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,30*k,Math.PI*0.55,Math.PI*1.45);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle=C.ink;ctx.fillRect(cx-k*1.6,cy-k*1.1,k*3.2,k*2.2);ctx.font=`700 ${Math.max(9,k*2.4)}px Overpass Mono, monospace`;ctx.textAlign='left';ctx.fillText('CCTV',cx+k*2,cy+k*0.8);}
+  // zone start markers + labels
+  function marker(s,lane,label,state){const q=place(s,lane*3.3);const col=state==='risk'?C.red:state==='oncoming'?C.amb:state==='off'?C.muted:'#2BB673';
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(X(q.x),Y(q.y),Math.max(4,k*1.4),0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=C.ink;ctx.font=`700 ${Math.max(9,k*2.4)}px Overpass Mono, monospace`;ctx.textAlign='center';ctx.fillText(label,X(q.x),Y(q.y)+(lane>0?-k*2.4:k*4.2));}
+  if(cfg.system){marker(Ls-Z,1,'ZONE A',signA);marker(Ls+p+Z,-1,'ZONE B',signB);}
+  ctx.font=`900 ${Math.max(11,k*4)}px Overpass, sans-serif`;ctx.fillStyle=C.ink;ctx.textAlign='left';
+  ctx.fillText('A ▶',X(-Ls)+4,Y(R+8.5));ctx.fillText('◀ B',X(-Ls)+4,Y(-R-6));
+  // vehicles
+  for(const v of veh){const q=place(v.s,v.dir);const ang=q.ang+(v.dir<0?Math.PI:0);
+    ctx.save();ctx.translate(X(q.x),Y(q.y));ctx.rotate(ang);
+    const lw=v.len*k,wd=(v.type==='Bike'?0.9:v.type==='Car'?1.8:2.5)*k;
+    if(v.id===selId){ctx.fillStyle=C.amb;ctx.globalAlpha=.5;ctx.beginPath();ctx.ellipse(0,0,lw/2+k*2,wd/2+k*2,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;}
+    ctx.globalAlpha=(cfg.system&&!v.det)?.55:1;
+    ctx.fillStyle=v.dir>0?C.blue:'#8A5CC2';ctx.fillRect(-lw/2,-wd/2,lw,wd);
+    ctx.fillStyle='rgba(255,255,255,.55)';ctx.fillRect(lw/2-Math.min(lw*0.25,k*1.4),-wd/2,Math.min(lw*0.25,k*1.4),wd);
+    ctx.globalAlpha=1;
+    if(v.app){ctx.strokeStyle='#fff';ctx.lineWidth=1.6;ctx.strokeRect(-lw/2-1.5,-wd/2-1.5,lw+3,wd+3);}
+    ctx.restore();}
+  // weather overlay
+  if(cfg.weather==='fog'){ctx.fillStyle='rgba(200,205,210,.28)';ctx.fillRect(0,0,W,H);}
+  if(cfg.weather==='rain'){ctx.strokeStyle='rgba(120,150,190,.35)';ctx.lineWidth=1;ctx.beginPath();for(let i=0;i<70;i++){const x=(i*97+simT*180)%W,y=(i*53+simT*420)%H;ctx.moveTo(x,y);ctx.lineTo(x-3,y+9);}ctx.stroke();}
+}
+
+// ---------- UI updates ----------
+const SIGN={clear:['clear','CLEAR — DRIVE CAREFULLY'],oncoming:['oncoming','VEHICLE AHEAD — SLOW'],risk:['risk','HEAD-ON RISK — HOLD LEFT'],off:['','SYSTEM OFF']};
+function setVms(el,s){const [c,t]=SIGN[s];el.className='vms '+c;el.querySelector('b').textContent=s==='oncoming'?`VEHICLE AHEAD — SLOW TO ${WX[cfg.weather].adv}`:t;}
+function ui(){
+  setVms($('#vmsA'),signA);setVms($('#vmsB'),signB);
+  const wx=WX[cfg.weather],Z=zoneLen();
+  $('#c-adv').textContent=wx.adv+' km/h';$('#c-ssd').textContent=ssd(40,wx.f).toFixed(1)+' m';$('#c-zone').textContent=Z+' m';$('#c-sight').textContent=wx.sight+' m';
+  $('#s-pass').textContent=st.pass;$('#s-warn').textContent=st.warn;$('#s-over').textContent=st.over;$('#s-near').textContent=st.near;$('#s-undet').textContent=st.undet;
+  // phone
+  const v=veh.find(x=>x.id===selId);const al=$('#ph-alert');$('#ph-lim').textContent=wx.adv;
+  if(!v){al.className='alert a-idle';al.innerHTML='WAITING<small>Tap a vehicle on the map</small>';$('#ph-spd').innerHTML='--<small>km/h</small>';['#ph-veh','#ph-dist','#ph-onc','#ph-fix','#ph-voice'].forEach(s=>$(s).textContent='—');}
+  else{
+    $('#ph-spd').innerHTML=Math.round(v.v*3.6)+'<small>km/h</small>';
+    $('#ph-veh').textContent='#'+v.id+' '+v.type+(v.dir>0?' · from A':' · from B');
+    const Ls=cfg.Ls,p=P();const d=v.dir>0?Ls-v.s:v.s-(Ls+p);
+    $('#ph-dist').textContent=d>0?Math.round(d)+' m':(((v.dir>0&&v.s<Ls+p)||(v.dir<0&&v.s>Ls))?'IN BEND':'passed');
+    const onc=v.dir>0?(signA==='oncoming'||signA==='risk'):(signB==='oncoming'||signB==='risk');
+    $('#ph-onc').textContent=cfg.system?(onc?'YES':'no'):'—';
+    $('#ph-fix').textContent=v.app?(simT-v.rep.t).toFixed(1)+' s ago':'no app';
+    let cls='a-idle',h='CRUISING',sm='No bend within warning range',voice='—';
+    if(!v.app){cls='a-noapp';h='NO APP';sm=cfg.cctv&&inCam(v.s)?'Seen by CCTV, but this driver gets no in-app alert':'This vehicle is invisible to the system';}
+    else if(!cfg.system){h='SYSTEM OFF';sm='Driver relies on signs and sight only';}
+    else if(v.state==='clear'){cls='a-clear';h='HAIRPIN AHEAD';sm=`No oncoming vehicle · max ${wx.adv} km/h`;voice=`Hairpin bend ahead. Keep below ${wx.adv}.`;}
+    else if(v.state==='oncoming'){cls='a-oncoming';h='VEHICLE AHEAD — SLOW';sm=`Oncoming vehicle in blind bend · slow to ${Math.max(15,wx.adv-8)} km/h`;voice='Vehicle approaching from the other side. Slow down.';}
+    else if(v.state==='risk'){cls='a-risk';h='HEAD-ON RISK';sm='Oncoming vehicle is inside the bend · hold left, 15 km/h';voice='Danger. Oncoming vehicle. Keep left and slow to fifteen.';}
+    else if(v.state==='over'){cls='a-over';h='SLOW DOWN';sm=`${Math.round(v.v*3.6)} km/h in a ${wx.adv} km/h hairpin zone`;voice='You are over the safe speed for this bend.';}
+    al.className='alert '+cls;al.innerHTML=h+'<small>'+sm+'</small>';$('#ph-voice').textContent=voice;
+  }
+  // dashboard
+  const on=tally.on,off=tally.off;$('#d-pairs').textContent=on.pairs+off.pairs;
+  const rate=T=>T.pairs?(100*T.near/T.pairs):null;const ro=rate(on),rf=rate(off);
+  $('#d-on').textContent=ro===null?'—':ro.toFixed(0)+'%';$('#d-off').textContent=rf===null?'—':rf.toFixed(0)+'%';
+  $('#d-cov').textContent=on.tot?Math.round(100*on.det/on.tot)+'%':'—';
+  const mx=Math.max(ro||0,rf||0,1);$('#b-on').style.width=((ro||0)/mx*100)+'%';$('#b-off').style.width=((rf||0)/mx*100)+'%';
+  $('#bt-on').textContent=ro===null?'—':ro.toFixed(0)+'% ('+on.pairs+')';$('#bt-off').textContent=rf===null?'—':rf.toFixed(0)+'% ('+off.pairs+')';
+}
+
+// network sample table
+const NET=[['Bend 07 (this sim)','Live',null,null],['Bend 03','Ghat road · uphill',142,38],['Bend 11','Ghat road · downhill',211,52],['Bend 14','Ghat road · downhill',96,21],['Bend 19','Forest stretch',58,17]];
+function renderNet(){$('#net').innerHTML=NET.map(r=>{let a=r[2],o=r[3];if(a===null){a=st.warn;o=st.pass?Math.round(100*st.over/Math.max(1,st.pass)):0;}
+  const risk=o>=45?['High','p-red']:o>=25?['Medium','p-amber']:['Low','p-green'];
+  return `<tr><td>${r[0]}</td><td>${r[1]}</td><td class="num">${a}</td><td class="num">${o}%</td><td><span class="pill ${risk[1]}">${risk[0]}</span></td></tr>`;}).join('');}
+
+// ---------- controls ----------
+$('#weather').onchange=e=>{cfg.weather=e.target.value;log('Setting',null,'Weather set to '+WX[cfg.weather].name);};
+$('#rate').onchange=e=>cfg.rate=+e.target.value;
+$('#simspd').onchange=e=>cfg.simspd=+e.target.value;
+$('#adopt').oninput=e=>{cfg.adoption=+e.target.value;$('#adoptVal').textContent=cfg.adoption+'%';};
+$('#sys').onchange=e=>{cfg.system=e.target.checked;log('Setting',null,'System '+(cfg.system?'ON':'OFF'));};
+$('#cctv').onchange=e=>cfg.cctv=e.target.checked;
+$('#pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'Resume':'Pause';};
+$('#reset').onclick=()=>{resetStats();renderNet();};
+$('#snd').onclick=e=>{try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();soundOn=!soundOn;e.target.textContent=soundOn?'Turn off alert sound':'Turn on alert sound';}catch(err){e.target.textContent='Sound not available';}};
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();const wx=(e.clientX-r.left)/k+xmin,wy=(e.clientY-r.top)/k+ymin;
+  let best=null,bd=12;for(const v of veh){const q=place(v.s,v.dir);const d=Math.hypot(q.x-wx,q.y-wy);if(d<bd){bd=d;best=v;}}if(best)selId=best.id;});
+
+// tabs
+function show(tab){if(!['sim','dash','how'].includes(tab))tab='sim';document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+tab));
+  document.querySelectorAll('nav a').forEach(a=>{if(a.dataset.tab===tab)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
+  if(tab==='sim')resize();}
+document.querySelectorAll('nav a').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();show(a.dataset.tab);try{history.replaceState(null,'','#'+a.dataset.tab);}catch(_){}}));
+show((location.hash||'#sim').slice(1));
+
+// warm start so the map opens busy
+for(let i=0;i<300;i++) step(0.1);
+resetStats();
+window.addEventListener('resize',resize);resize();
+let last=performance.now(),uiT=0,netT=0;
+function loop(now){const dt=Math.min(0.1,(now-last)/1000);last=now;
+  if(!paused){const n=cfg.simspd;for(let i=0;i<n*2;i++)step(dt/2);}
+  if(!veh.some(v=>v.id===selId)){const c=veh.find(v=>v.app&&((v.dir>0&&v.s<cfg.Ls)||(v.dir<0&&v.s>cfg.Ls+P())));selId=c?c.id:null;}
+  draw();uiT+=dt;if(uiT>0.15){ui();uiT=0;}netT+=dt;if(netT>2){renderNet();netT=0;}
+  requestAnimationFrame(loop);}
+renderNet();requestAnimationFrame(loop);
+window.__sim={step,cfg,get veh(){return veh},get st(){return st},get tally(){return tally},resetStats};
+})();
+</script>
+
+</body>
+</html>

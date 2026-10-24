@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GHAT-SAFE Driver</title>
+<meta name="theme-color" content="#16191C">
+<style>
+:root{--bg:#16191C;--card:#22262B;--ink:#E9ECEB;--muted:#97A0A6;--amber:#F2B01E;--red:#D7263D;--green:#1E8A4C;--blue:#5B9BE6;--violet:#A57BDB}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:460px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-left)) 32px max(16px,env(safe-area-inset-right));display:flex;flex-direction:column;gap:12px}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:18px;letter-spacing:.06em;margin:0}
+.muted{color:var(--muted);font-size:13px}
+.alert{border-radius:16px;padding:18px;text-align:center;font-weight:900;font-size:24px;line-height:1.15;background:var(--card);color:var(--muted)}
+.alert small{display:block;font-weight:600;font-size:14px;margin-top:8px;line-height:1.35}
+.s-clear{background:#14532D;color:#C9F7D9}.s-oncoming{background:var(--amber);color:#1A1400}.s-risk{background:var(--red);color:#fff}
+.s-overspeed{background:#7A1020;color:#fff}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.spd{font-size:64px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1}
+.spd span{font-size:15px;color:var(--muted);font-weight:600;margin-left:4px}
+.limit{width:76px;height:76px;border-radius:50%;background:#fff;border:8px solid var(--red);color:#111;display:grid;place-items:center;font-weight:900;font-size:26px;flex:none}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:14px}
+.kv b{text-align:right;font-variant-numeric:tabular-nums}
+canvas{width:100%;background:#1E2a22;border-radius:12px;display:block}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+select,button,input{font:inherit;padding:10px;border-radius:10px;border:1px solid #3A4047;background:var(--card);color:var(--ink)}
+button.go{background:var(--amber);color:#1A1400;border:0;font-weight:800}
+button:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.full{grid-column:1/-1}
+.err{color:#FF8A95;font-size:13px;min-height:1em}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>GHAT-SAFE</h1><span class="muted" id="conn">offline</span></header>
+  <div class="alert" id="alert">READY<small>Choose a mode and press Start</small></div>
+  <div class="row"><div class="spd" id="spd">0<span>km/h</span></div><div class="limit" id="lim">25</div></div>
+  <div class="kv">
+    <span class="muted">Bend</span><b id="bendName">—</b>
+    <span class="muted">Distance to bend</span><b id="dist">—</b>
+    <span class="muted">Direction</span><b id="dir">—</b>
+    <span class="muted">Signs A / B</span><b id="signs">—</b>
+  </div>
+  <canvas id="map" width="900" height="420" aria-label="Map of the bend with your position"></canvas>
+  <div class="controls">
+    <label>Bend<select id="bend"></select></label>
+    <label>Mode<select id="mode"><option value="demo">Demo drive (indoor)</option><option value="gps">Live GPS</option></select></label>
+    <label class="full">Server<input id="api" placeholder="leave blank to use this server"></label>
+    <button class="go" id="start">Start</button><button id="stop">Stop</button>
+    <label class="full"><span><input type="checkbox" id="ghost" checked> Demo: send an oncoming bus from Approach B</span></label>
+  </div>
+  <p class="err" id="err"></p>
+  <p class="muted">Voice alerts play after you press Start. In Live GPS mode the phone shares only its position and speed, and only while this page is open.</p>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const vid='phone-'+Math.random().toString(36).slice(2,8);
+let API='',bend=null,line=null,timer=null,watchId=null,lastState='',gps=null,others=[];
+const api=p=>(($('#api').value.trim()||API).replace(/\/$/,''))+p;
+
+function buildLine(points){const [lat0,lon0]=points[0];const kx=111320*Math.cos(lat0*Math.PI/180),ky=110540;
+  const xy=points.map(([la,lo])=>[(lo-lon0)*kx,(la-lat0)*ky]);const ch=[0];for(let i=1;i<xy.length;i++)ch.push(ch[i-1]+Math.hypot(xy[i][0]-xy[i-1][0],xy[i][1]-xy[i-1][1]));
+  return {xy,ch,len:ch[ch.length-1],at(s){s=Math.max(0,Math.min(this.len,s));let i=0;while(i<ch.length-2&&ch[i+1]<s)i++;const u=(s-ch[i])/((ch[i+1]-ch[i])||1);
+    const x=xy[i][0]+u*(xy[i+1][0]-xy[i][0]),y=xy[i][1]+u*(xy[i+1][1]-xy[i][1]);return {x,y,lat:lat0+y/ky,lon:lon0+x/kx};},
+    toXY(la,lo){return [(lo-lon0)*kx,(la-lat0)*ky];}};}
+
+async function loadBends(){
+  try{const r=await fetch(api('/api/bends'));const list=await r.json();$('#bend').innerHTML=list.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    $('#conn').textContent='connected';await selectBend();}
+  catch(e){$('#conn').textContent='offline';$('#err').textContent='Cannot reach the GHAT-SAFE server. Start it with "uvicorn main:app" or enter its address above.';}}
+async function selectBend(){const r=await fetch(api('/api/bends/'+$('#bend').value));bend=await r.json();line=buildLine(bend.points);$('#bendName').textContent=bend.name;$('#lim').textContent=bend.advisory_kmh;draw();}
+$('#bend').onchange=selectBend;
+
+async function send(id,lat,lon,speed){const r=await fetch(api('/api/report'),{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({bend_id:bend.id,vehicle_id:id,lat,lon,speed_kmh:Math.max(0,speed)})});if(!r.ok)throw new Error('Server rejected report ('+r.status+')');return r.json();}
+
+function show(a,speed){const el=$('#alert');el.className='alert s-'+a.state;el.innerHTML=a.title+'<small>'+a.detail+'</small>';
+  $('#spd').innerHTML=Math.round(speed)+'<span>km/h</span>';$('#lim').textContent=a.advisory_kmh;
+  $('#dist').textContent=a.distance_to_bend_m==null?'—':(a.distance_to_bend_m>0?Math.round(a.distance_to_bend_m)+' m':'in / past bend');
+  $('#dir').textContent=a.direction||'—';
+  if(a.state!==lastState&&a.voice&&'speechSynthesis' in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(a.voice));}
+  lastState=a.state;}
+
+async function pollSigns(){try{const s=await (await fetch(api('/api/bends/'+bend.id+'/state'))).json();$('#signs').textContent=s.sign_A+' / '+s.sign_B;}catch(_){}}
+
+// ---- demo drive: you from A, optional bus from B ----
+let me,bus;
+function startDemo(){me={s:0,v:40,target:40};bus=$('#ghost').checked?{s:line.len,v:32,delay:5}:null;let t=0;
+  timer=setInterval(async()=>{t++;
+    const want=lastState==='risk'?15:lastState==='oncoming'?Math.max(15,bend.advisory_kmh-8):(lastState==='clear'||lastState==='overspeed')?bend.advisory_kmh:40;
+    me.v+=Math.max(-8,Math.min(4,want-me.v));me.s+=me.v/3.6;
+    if(bus&&t>bus.delay){bus.s-=bus.v/3.6;}
+    try{const p=line.at(me.s);const a=await send(vid,p.lat,p.lon,me.v);show(a,me.v);
+      others=[];if(bus&&t>bus.delay&&bus.s>0){const q=line.at(bus.s);await send(vid+'-bus',q.lat,q.lon,bus.v);others.push({...q,bus:true});}
+      gps={x:p.x,y:p.y};pollSigns();draw();$('#err').textContent='';}catch(e){$('#err').textContent=e.message;}
+    if(me.s>=line.len){stop();$('#alert').innerHTML='DEMO COMPLETE<small>Press Start to drive again</small>';$('#alert').className='alert';}
+  },1000);}
+
+// ---- live GPS ----
+function startGps(){if(!navigator.geolocation){$('#err').textContent='This browser has no GPS access.';return;}
+  let last=null;
+  watchId=navigator.geolocation.watchPosition(p=>{last=p;},e=>{$('#err').textContent='GPS error: '+e.message;},{enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+  timer=setInterval(async()=>{if(!last)return;const c=last.coords;const kmh=(c.speed??0)*3.6;
+    try{const a=await send(vid,c.latitude,c.longitude,kmh);show(a,kmh);const [x,y]=line.toXY(c.latitude,c.longitude);gps={x,y};others=[];pollSigns();draw();$('#err').textContent='';}
+    catch(e){$('#err').textContent=e.message;}},1000);}
+
+function stop(){clearInterval(timer);timer=null;if(watchId!==null){navigator.geolocation.clearWatch(watchId);watchId=null;}}
+$('#start').onclick=()=>{stop();lastState='';if(!line){$('#err').textContent='No bend loaded yet.';return;}
+  if('speechSynthesis' in window) speechSynthesis.speak(new SpeechSynthesisUtterance('GHAT SAFE started'));
+  $('#mode').value==='demo'?startDemo():startGps();};
+$('#stop').onclick=stop;
+$('#api').onchange=loadBends;
+
+function draw(){const cv=$('#map'),ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);if(!line)return;
+  const xs=line.xy.map(p=>p[0]),ys=line.xy.map(p=>p[1]);const mnx=Math.min(...xs),mxx=Math.max(...xs),mny=Math.min(...ys),mxy=Math.max(...ys);
+  const k=Math.min((cv.width-60)/(mxx-mnx||1),(cv.height-60)/(mxy-mny||1));const X=x=>30+(x-mnx)*k,Y=y=>cv.height-30-(y-mny)*k;
+  const seg=(s0,s1,col,w)=>{ctx.beginPath();for(let s=s0,i=0;s<=s1;s+=2,i++){const p=line.at(s);i?ctx.lineTo(X(p.x),Y(p.y)):ctx.moveTo(X(p.x),Y(p.y));}ctx.strokeStyle=col;ctx.lineWidth=w;ctx.lineCap='round';ctx.stroke();};
+  seg(0,line.len,'#4A5056',26);const z=bend.zone_length_m;
+  seg(bend.bend_start-z,bend.bend_start,'rgba(242,176,30,.55)',26);seg(bend.bend_end,bend.bend_end+z,'rgba(242,176,30,.55)',26);seg(bend.bend_start,bend.bend_end,'rgba(215,38,61,.55)',26);
+  ctx.fillStyle='#E9ECEB';ctx.font='bold 26px system-ui';const a=line.at(0),b=line.at(line.len);ctx.fillText('A',X(a.x)-8,Y(a.y)-22);ctx.fillText('B',X(b.x)-8,Y(b.y)-24);
+  for(const o of others){ctx.fillStyle='#A57BDB';ctx.beginPath();ctx.arc(X(o.x),Y(o.y),12,0,7);ctx.fill();}
+  if(gps){ctx.fillStyle='#5B9BE6';ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.beginPath();ctx.arc(X(gps.x),Y(gps.y),13,0,7);ctx.fill();ctx.stroke();}}
+
+API=location.protocol.startsWith('http')?location.origin:'http://localhost:8000';
+loadBends();
+</script>
+</body>
+</html>
